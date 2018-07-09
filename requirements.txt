@@ -3,3 +3,4 @@ requests
 flake8
 PyYAML
 jenkinsapi
+pygerrit2

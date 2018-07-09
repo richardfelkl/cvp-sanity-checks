@@ -67,6 +67,8 @@ test_mtu:
 
 drivetrain_version: ''
 
+drivetrain_repos: ["mk/mk-pipelines", "mcp-ci/pipeline-library"]
+
 # ntp test setting
 # this test may skip specific node (use fqdn)
 test_ntp_sync:

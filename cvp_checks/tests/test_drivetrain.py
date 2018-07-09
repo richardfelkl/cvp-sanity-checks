@@ -1,6 +1,7 @@
 from jenkinsapi.jenkins import Jenkins
 from xml.dom import minidom
 from cvp_checks import utils
+from pygerrit2 import GerritRestAPI, HTTPBasicAuth
 import json
 import pytest
 
@@ -89,3 +90,77 @@ def test_jenkins_jobs_branch(local_salt_client):
     assert len(version_mismatch) == 0, \
         '''Some DriveTrain jobs have version/branch mismatch:
               {}'''.format(json.dumps(version_mismatch, indent=4))
+
+def test_jenkins_plugins(local_salt_client):
+    missing_plugins = []
+    jenkins_password = local_salt_client.cmd(
+        'jenkins:client',
+        'pillar.get',
+        ['_param:openldap_admin_password'],
+        expr_form='pillar').values()[0]
+    jenkins_port = local_salt_client.cmd(
+        'I@jenkins:client and not I@salt:master',
+        'pillar.get',
+        ['_param:haproxy_jenkins_bind_port'],
+        expr_form='compound').values()[0]
+    jenkins_address = local_salt_client.cmd(
+        'I@jenkins:client and not I@salt:master',
+        'pillar.get',
+        ['_param:haproxy_jenkins_bind_host'],
+        expr_form='compound').values()[0]
+    jenkins_url = 'http://{0}:{1}'.format(jenkins_address,jenkins_port)
+    server = Jenkins(jenkins_url, username='admin', password=jenkins_password)
+    installed_plugins = server.get_plugins()
+
+    required_plugins = local_salt_client.cmd(
+            'I@jenkins:client and not I@salt:master',
+            'pillar.get',
+            ['jenkins:client:plugin'],
+            expr_form='compound').values()[0]
+
+    for plugin in required_plugins:
+        if plugin not in installed_plugins:
+            missing_plugins.append("Jenkins has missing plugin {0}.".format(plugin))
+
+    assert len(missing_plugins) == 0, \
+        '''Some Jenkins plugins are not installed.:
+              {}'''.format(json.dumps(missing_plugins, indent=4))
+
+def test_gerrit_repositories(local_salt_client):
+    missing_repos = []
+    config = utils.get_configuration()
+    gerrit_password = local_salt_client.cmd(
+        'I@gerrit:client',
+        'pillar.get',
+        ['_param:openldap_admin_password'],
+        expr_form='compound').values()[0]
+    gerrit_port = local_salt_client.cmd(
+        'I@gerrit:client',
+        'pillar.get',
+        ['gerrit:client:server:http_port'],
+        expr_form='compound').values()[0]
+    gerrit_address = local_salt_client.cmd(
+        'I@gerrit:client',
+        'pillar.get',
+        ['gerrit:client:server:host'],
+        expr_form='compound').values()[0]
+    gerrit_protocol = local_salt_client.cmd(
+        'I@gerrit:client',
+        'pillar.get',
+        ['gerrit:client:server:protocol'],
+        expr_form='compound').values()[0]
+
+    auth = HTTPBasicAuth('admin', gerrit_password)
+    rest = GerritRestAPI(url="{0}://{1}:{2}".format(gerrit_protocol, gerrit_address, gerrit_port), auth=auth)
+
+    for repo in config['drivetrain_repos']:
+        repoHttp = repo.replace("/", "%2F")
+        try:
+            response = rest.get("/projects/{0}".format(repoHttp))
+        except requests.exceptions.HTTPError as e:
+            missing_repos.append("Repo {0} is missing".format(repo))
+
+
+    assert len(missing_repos) == 0, \
+        '''Some repositories in Gerrit are missing:
+              {}'''.format(json.dumps(missing_repos, indent=4))
